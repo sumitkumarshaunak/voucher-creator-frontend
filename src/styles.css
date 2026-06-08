@@ -406,6 +406,7 @@ select:focus,
 }
 
 .voucher-editor {
+  container-type: inline-size;
   display: grid;
   width: 100%;
   gap: 16px;
@@ -575,6 +576,7 @@ select:focus,
 }
 
 .bank-voucher-editor {
+  container-type: inline-size;
   display: grid;
   width: 100%;
   gap: 16px;
@@ -583,7 +585,7 @@ select:focus,
 
 .bank-summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
   gap: 10px;
 }
 
@@ -662,6 +664,7 @@ select:focus,
   color: #172033;
   font-size: 1rem;
   line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .amount-pill {
@@ -749,11 +752,18 @@ select:focus,
 }
 
 @media (max-width: 1080px) {
-  .voucher-grid {
-    grid-template-columns: 1fr;
+  .transaction-voucher-header {
+    display: grid;
   }
 
-  .bank-summary-grid {
+  .amount-pill {
+    width: 100%;
+    text-align: left;
+  }
+}
+
+@container (max-width: 620px) {
+  .voucher-grid {
     grid-template-columns: 1fr;
   }
 
