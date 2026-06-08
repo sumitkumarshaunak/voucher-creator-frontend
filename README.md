@@ -5,7 +5,7 @@ React/Vite frontend for uploading voucher documents, previewing the selected fil
 ## Setup
 
 ```bash
-cd /Users/amanjain/Desktop/voucher/voucher-frontend
+cd voucher-frontend
 npm install
 ```
 
