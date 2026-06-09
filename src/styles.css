@@ -430,6 +430,33 @@ select:focus,
   font-weight: 700;
 }
 
+.parse-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.post-button {
+  min-height: 38px;
+  padding: 0 18px;
+  border: 1px solid #172033;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #172033;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.post-button:hover {
+  border-color: #2f3c52;
+  background: #2f3c52;
+}
+
+.post-button:focus-visible {
+  outline: 3px solid rgba(23, 32, 51, 0.18);
+  outline-offset: 2px;
+}
+
 .voucher-editor {
   container-type: inline-size;
   display: grid;
@@ -450,10 +477,17 @@ select:focus,
 .voucher-section {
   display: grid;
   gap: 12px;
+  padding: 14px;
+  border: 1px solid #dce3ee;
+  border-radius: 6px;
+  background: #fbfdff;
 }
 
 .voucher-section h2 {
-  margin: 0;
+  margin: -14px -14px 2px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f4f7fb;
   color: #172033;
   font-size: 1rem;
   line-height: 1.2;

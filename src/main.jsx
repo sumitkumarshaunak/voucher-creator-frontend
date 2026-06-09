@@ -228,8 +228,8 @@ function normalizeInvoiceResult(result) {
     sgst_amount: '',
     igst_amount: '',
     cess_amount: '',
-    other_charges: '',
     total_tax_amount: '',
+    other_charges: '',
     round_off_amount: '',
     grand_total: '',
     ...(normalized.totals || {}),
@@ -277,6 +277,311 @@ function formatLabel(key) {
     .split('_')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function displayValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '';
+  }
+
+  return String(value);
+}
+
+function renderFieldGrid(fields) {
+  return `
+    <div class="field-grid">
+      ${fields
+        .map(
+          ([label, value]) => `
+            <div class="field">
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(displayValue(value))}</strong>
+            </div>
+          `,
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+function renderObjectFields(object = {}) {
+  return renderFieldGrid(Object.entries(object).map(([key, value]) => [formatLabel(key), value]));
+}
+
+function renderInvoicePrintHtml(voucher) {
+  const itemRows = (voucher.items || [])
+    .map(
+      (item, itemIndex) => `
+        <tr>
+          <td>Item ${itemIndex + 1}</td>
+          <td>Product</td>
+          <td>${escapeHtml(displayValue(item.description))}</td>
+          <td>${escapeHtml(displayValue(item.hsn_code))}</td>
+          <td>${escapeHtml(displayValue(item.quantity))}</td>
+          <td>${escapeHtml(displayValue(item.rate))}</td>
+          <td>${escapeHtml(displayValue(item.taxable_amount))}</td>
+          <td>${escapeHtml(displayValue(item.line_total))}</td>
+        </tr>
+        ${(item.lines || [])
+          .map(
+            (line) => `
+              <tr>
+                <td>Item Line</td>
+                <td>${escapeHtml(displayValue(line.line_type))}</td>
+                <td>${escapeHtml(displayValue(line.description))}</td>
+                <td></td>
+                <td></td>
+                <td>${escapeHtml(displayValue(line.rate))}</td>
+                <td></td>
+                <td>${escapeHtml(displayValue(line.amount))}</td>
+              </tr>
+            `,
+          )
+          .join('')}
+      `,
+    )
+    .join('');
+
+  const invoiceLineRows = (voucher.invoice_lines || [])
+    .map(
+      (line) => `
+        <tr>
+          <td>Invoice Line</td>
+          <td>${escapeHtml(displayValue(line.line_type))}</td>
+          <td>${escapeHtml(displayValue(line.description))}</td>
+          <td></td>
+          <td></td>
+          <td>${escapeHtml(displayValue(line.rate))}</td>
+          <td></td>
+          <td>${escapeHtml(displayValue(line.amount))}</td>
+        </tr>
+      `,
+    )
+    .join('');
+
+  return `
+    <section>
+      <h2>Invoice</h2>
+      ${renderFieldGrid([
+        ['Document Type', voucher.document_type],
+        ['Invoice No', voucher.invoice_no],
+        ['Invoice Date', voucher.invoice_date],
+        ['Ack No', voucher.ack_no],
+        ['Ack Date', voucher.ack_date],
+        ['IRN', voucher.irn],
+      ])}
+    </section>
+
+    <section>
+      <h2>Seller</h2>
+      ${renderObjectFields(voucher.seller)}
+    </section>
+
+    <section>
+      <h2>Buyer</h2>
+      ${renderObjectFields(voucher.buyer)}
+    </section>
+
+    <section>
+      <h2>Transportation</h2>
+      ${renderObjectFields(voucher.transportation)}
+    </section>
+
+    <section>
+      <h2>Product Item Summary</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Section</th>
+            <th>Line Type</th>
+            <th>Description</th>
+            <th>HSN</th>
+            <th>Quantity</th>
+            <th>Rate</th>
+            <th>Taxable</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemRows}
+          ${invoiceLineRows}
+          <tr class="total-row">
+            <td colspan="7">Grand Total</td>
+            <td>${escapeHtml(displayValue(voucher.totals?.grand_total))}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Totals</h2>
+      ${renderObjectFields(voucher.totals)}
+    </section>
+  `;
+}
+
+function renderBankStatementPrintHtml(statement) {
+  const transactions = statement.transactions || [];
+  const transactionRows = transactions
+    .map(
+      (transaction, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(displayValue(transaction.txn_date))}</td>
+          <td>${escapeHtml(displayValue(transaction.value_date))}</td>
+          <td>${escapeHtml(displayValue(transaction.mode))}</td>
+          <td>${escapeHtml(displayValue(transaction.direction))}</td>
+          <td>${escapeHtml(displayValue(transaction.amount))}</td>
+          <td>${escapeHtml(displayValue(transaction.reference))}</td>
+          <td>${escapeHtml(displayValue(transaction.party_name))}</td>
+          <td>${escapeHtml(displayValue(transaction.balance))}</td>
+        </tr>
+      `,
+    )
+    .join('');
+
+  return `
+    <section>
+      <h2>Statement</h2>
+      ${renderFieldGrid([
+        ['Bank', statement.bank],
+        ['Account Number', statement.account_number],
+        ['Statement Period', statement.statement_period],
+        ['Transactions', transactions.length],
+      ])}
+    </section>
+
+    <section>
+      <h2>Transaction Vouchers</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Txn Date</th>
+            <th>Value Date</th>
+            <th>Mode</th>
+            <th>Direction</th>
+            <th>Amount</th>
+            <th>Reference</th>
+            <th>Party</th>
+            <th>Balance</th>
+          </tr>
+        </thead>
+        <tbody>${transactionRows}</tbody>
+      </table>
+    </section>
+  `;
+}
+
+function createOutputPdf(data, title, fileId) {
+  const printWindow = window.open('', '_blank');
+
+  if (!printWindow) {
+    window.alert('Popup blocked. Allow popups to create the PDF.');
+    return;
+  }
+
+  printWindow.opener = null;
+  const outputHtml =
+    fileId === 'bank-statement' ? renderBankStatementPrintHtml(data) : renderInvoicePrintHtml(data);
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>${escapeHtml(title)}</title>
+        <style>
+          @page { margin: 18mm; }
+          body {
+            margin: 0;
+            color: #111827;
+            font-family: Inter, Arial, sans-serif;
+            font-size: 11px;
+            line-height: 1.35;
+          }
+          h1 {
+            margin: 0 0 14px;
+            font-size: 18px;
+          }
+          section {
+            margin: 0 0 14px;
+            border: 1px solid #dce3ee;
+            break-inside: avoid;
+          }
+          h2 {
+            margin: 0;
+            padding: 8px 10px;
+            border-bottom: 1px solid #dce3ee;
+            background: #f4f7fb;
+            font-size: 13px;
+          }
+          .field-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0;
+          }
+          .field {
+            min-height: 44px;
+            padding: 8px 10px;
+            border-right: 1px solid #e5eaf2;
+            border-bottom: 1px solid #e5eaf2;
+          }
+          .field span {
+            display: block;
+            margin-bottom: 3px;
+            color: #52637a;
+            font-size: 9px;
+            font-weight: 800;
+            text-transform: uppercase;
+          }
+          .field strong {
+            font-size: 11px;
+            font-weight: 700;
+            overflow-wrap: anywhere;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+          }
+          th,
+          td {
+            padding: 6px 7px;
+            border: 1px solid #dce3ee;
+            text-align: left;
+            vertical-align: top;
+            overflow-wrap: anywhere;
+          }
+          th {
+            color: #52637a;
+            background: #f8fafc;
+            font-size: 9px;
+            text-transform: uppercase;
+          }
+          .total-row td {
+            background: #eef6ff;
+            font-weight: 800;
+          }
+        </style>
+      </head>
+      <body>
+        <h1>${escapeHtml(title)}</h1>
+        ${outputHtml}
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  window.setTimeout(() => {
+    printWindow.focus();
+    printWindow.print();
+  }, 100);
 }
 
 function VoucherField({ label, value, onChange, multiline = false }) {
@@ -988,6 +1293,10 @@ function FilePreviewPage({ selectedFile, onBack }) {
     }
   }, [voucherData]);
 
+  const handlePost = () => {
+    createOutputPdf(voucherData, `${label} Output`, selectedFile.id);
+  };
+
   if (!selectedFile) {
     return null;
   }
@@ -1061,10 +1370,19 @@ function FilePreviewPage({ selectedFile, onBack }) {
       />
 
       <aside ref={parsePaneRef} className="parse-pane" aria-label="Parse document">
-        {voucherData && selectedFile.id === 'bank-statement' ? (
-          <BankStatementVouchers statement={voucherData} onStatementChange={setVoucherData} />
-        ) : voucherData ? (
-          <EditableVoucher voucher={voucherData} onVoucherChange={setVoucherData} />
+        {voucherData ? (
+          <>
+            <div className="parse-toolbar">
+              <button type="button" className="post-button" onClick={handlePost}>
+                Post
+              </button>
+            </div>
+            {selectedFile.id === 'bank-statement' ? (
+              <BankStatementVouchers statement={voucherData} onStatementChange={setVoucherData} />
+            ) : (
+              <EditableVoucher voucher={voucherData} onVoucherChange={setVoucherData} />
+            )}
+          </>
         ) : (
           <div className="parse-action">
             <button
