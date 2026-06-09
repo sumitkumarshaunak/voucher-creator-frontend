@@ -121,7 +121,6 @@ const parsedBankStatementJson = {
       party_name: 'BHAGWATITRANSPORT CO',
       party_identifier: null,
       ifsc: 'HDFC0001968',
-      phone: null,
       balance: 826288.1,
     },
     {
@@ -136,7 +135,6 @@ const parsedBankStatementJson = {
       party_name: 'ULTRA TECH CEMENT LTD',
       party_identifier: '084010200013129',
       ifsc: 'UTIB0000084',
-      phone: null,
       balance: 1238325.26,
     },
     {
@@ -151,7 +149,6 @@ const parsedBankStatementJson = {
       party_name: null,
       party_identifier: 'bachhu.singh4@i',
       ifsc: null,
-      phone: null,
       balance: 1234125.26,
     },
   ],
@@ -260,7 +257,6 @@ function normalizeBankStatementResult(result) {
       party_name: transaction.party_name ?? transaction.party?.name ?? '',
       party_identifier: transaction.party_identifier ?? transaction.party?.identifier ?? '',
       ifsc: transaction.ifsc ?? '',
-      phone: transaction.phone ?? '',
       balance: transaction.balance ?? '',
     })),
   };
@@ -756,11 +752,6 @@ function BankStatementVouchers({ statement, onStatementChange }) {
                 label="IFSC"
                 value={transaction.ifsc}
                 onChange={(value) => setTransactionField(transactionIndex, 'ifsc', value)}
-              />
-              <VoucherField
-                label="Phone"
-                value={transaction.phone}
-                onChange={(value) => setTransactionField(transactionIndex, 'phone', value)}
               />
               <VoucherField
                 label="Balance"
