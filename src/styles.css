@@ -286,8 +286,33 @@ select:focus,
 }
 
 .spreadsheet-preview {
+  display: grid;
+  gap: 18px;
   width: 100%;
-  overflow: visible;
+  overflow: auto;
+}
+
+.spreadsheet-sheet {
+  min-width: max-content;
+}
+
+.spreadsheet-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #d8e1ed;
+  border-bottom: 0;
+  background: #f8fafc;
+  color: #243047;
+  gap: 16px;
+}
+
+.spreadsheet-sheet-header span {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .spreadsheet-preview table {

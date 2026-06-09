@@ -31,7 +31,7 @@ const uploadItems = [
   },
 ];
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
 const parsedVoucherJson = {
   document_type: 'Tax Invoice',
@@ -105,94 +105,54 @@ const parsedVoucherJson = {
 };
 
 const parsedBankStatementJson = {
+  bank: 'ICICI Bank',
+  account_number: '337705001075',
+  statement_period: 'From 01/05/2026 To 01/06/2026',
   transactions: [
     {
+      tran_id: 'S80780973',
       value_date: '2026-05-01',
-      transaction_number: 'ICICR42026050100502895',
-      payment_mode: 'RTGS',
-      party: {
-        name: 'BHAGWATITRANSPORT CO',
-        identifier: 'HDFC0001968',
-      },
+      txn_date: '2026-05-01 07:51:08 AM',
+      description: 'RTGS/ICICR42026050100502895/HDFC0001968/BHAGWATITRANSPORT CO',
+      mode: 'RTGS',
+      direction: 'debit',
       amount: 450000,
-      direction: 'debit',
+      reference: 'ICICR42026050100502895',
+      party_name: 'BHAGWATITRANSPORT CO',
+      party_identifier: null,
+      ifsc: 'HDFC0001968',
+      phone: null,
+      balance: 826288.1,
     },
     {
+      tran_id: 'S86465177',
       value_date: '2026-05-01',
-      transaction_number: 'UTIBR72026050100131060',
-      payment_mode: 'RTGS',
-      party: {
-        name: 'ULTRA TECH CEMENT LTD',
-        identifier: '084010200013129',
-      },
+      txn_date: '2026-05-01 07:00:05 PM',
+      description: 'RTGS-UTIBR72026050100131060-ULTRA TECH CEMENT LTD-084010200013129-UTIB0000084',
+      mode: 'RTGS',
+      direction: 'credit',
       amount: 412037.16,
-      direction: 'credit',
+      reference: 'UTIBR72026050100131060',
+      party_name: 'ULTRA TECH CEMENT LTD',
+      party_identifier: '084010200013129',
+      ifsc: 'UTIB0000084',
+      phone: null,
+      balance: 1238325.26,
     },
     {
+      tran_id: 'S87758353',
       value_date: '2026-05-01',
-      transaction_number: '109722460725',
-      payment_mode: 'UPI',
-      party: {
-        name: '',
-        identifier: 'bachhu.singh4@i',
-      },
+      txn_date: '2026-05-01 10:19:58 PM',
+      description: 'UPI/109722460725/HR55AT7757/bachhu.singh4@i//ICI669ab0024aaa4b7387bc8bb48a82d08c/',
+      mode: 'UPI',
+      direction: 'debit',
       amount: 4200,
-      direction: 'debit',
-    },
-    {
-      value_date: '2026-05-01',
-      transaction_number: '109722463673',
-      payment_mode: 'UPI',
-      party: {
-        name: '',
-        identifier: '9318456385-a865',
-      },
-      amount: 4100,
-      direction: 'debit',
-    },
-    {
-      value_date: '2026-05-02',
-      transaction_number: 'IN42612257625004',
-      payment_mode: 'NEFT',
-      party: {
-        name: 'LAVITRADELINKSR',
-        identifier: 'RJ29GB0240',
-      },
-      amount: 103650,
-      direction: 'debit',
-    },
-    {
-      value_date: '2026-05-03',
-      transaction_number: '044268784461',
-      payment_mode: 'INFT',
-      party: {
-        name: 'FATEHCHANDHR57A',
-        identifier: 'HR57A1301',
-      },
-      amount: 841329,
-      direction: 'debit',
-    },
-    {
-      value_date: '2026-05-04',
-      transaction_number: 'INDBR52026050400829031',
-      payment_mode: 'RTGS',
-      party: {
-        name: 'AJAY KUMAR',
-        identifier: '158950600029',
-      },
-      amount: 200000,
-      direction: 'credit',
-    },
-    {
-      value_date: '2026-05-05',
-      transaction_number: 'ICICR42026050500514406',
-      payment_mode: 'RTGS',
-      party: {
-        name: 'JAI HANUMAN TRANSPORT CO',
-        identifier: 'HDFC0002762',
-      },
-      amount: 300000,
-      direction: 'debit',
+      reference: '109722460725',
+      party_name: null,
+      party_identifier: 'bachhu.singh4@i',
+      ifsc: null,
+      phone: null,
+      balance: 1234125.26,
     },
   ],
 };
@@ -285,16 +245,23 @@ function normalizeInvoiceResult(result) {
 
 function normalizeBankStatementResult(result) {
   return {
+    bank: result?.bank ?? '',
+    account_number: result?.account_number ?? '',
+    statement_period: result?.statement_period ?? '',
     transactions: (result?.transactions || []).map((transaction) => ({
+      tran_id: transaction.tran_id ?? '',
       value_date: transaction.value_date ?? '',
-      transaction_number: transaction.transaction_number ?? '',
-      payment_mode: transaction.payment_mode ?? '',
-      party: {
-        name: transaction.party?.name ?? '',
-        identifier: transaction.party?.identifier ?? '',
-      },
-      amount: transaction.amount ?? '',
+      txn_date: transaction.txn_date ?? '',
+      description: transaction.description ?? '',
+      mode: transaction.mode ?? transaction.payment_mode ?? '',
       direction: transaction.direction ?? '',
+      amount: transaction.amount ?? '',
+      reference: transaction.reference ?? transaction.transaction_number ?? '',
+      party_name: transaction.party_name ?? transaction.party?.name ?? '',
+      party_identifier: transaction.party_identifier ?? transaction.party?.identifier ?? '',
+      ifsc: transaction.ifsc ?? '',
+      phone: transaction.phone ?? '',
+      balance: transaction.balance ?? '',
     })),
   };
 }
@@ -645,6 +612,13 @@ function BankStatementVouchers({ statement, onStatementChange }) {
     { credit: 0, debit: 0, creditCount: 0, debitCount: 0 },
   );
 
+  const setStatementField = (key, value) => {
+    onStatementChange((currentStatement) => ({
+      ...currentStatement,
+      [key]: value,
+    }));
+  };
+
   const setTransactionField = (transactionIndex, key, value) => {
     onStatementChange((currentStatement) => ({
       ...currentStatement,
@@ -654,29 +628,35 @@ function BankStatementVouchers({ statement, onStatementChange }) {
     }));
   };
 
-  const setPartyField = (transactionIndex, key, value) => {
-    onStatementChange((currentStatement) => ({
-      ...currentStatement,
-      transactions: currentStatement.transactions.map((transaction, index) =>
-        index === transactionIndex
-          ? {
-              ...transaction,
-              party: {
-                ...transaction.party,
-                [key]: value,
-              },
-            }
-          : transaction,
-      ),
-    }));
-  };
-
   return (
     <div className="bank-voucher-editor">
       <div className="voucher-editor-header">
         <p className="eyebrow">Parsed Bank Statement</p>
-        <h1>{transactions.length} Transaction Vouchers</h1>
+        <h1>{statement.bank || 'Bank Statement'}</h1>
+        <p>
+          {statement.account_number || 'No account number'} · {transactions.length} transaction vouchers
+        </p>
       </div>
+
+      <VoucherSection title="Statement">
+        <div className="voucher-grid">
+          <VoucherField
+            label="Bank"
+            value={statement.bank}
+            onChange={(value) => setStatementField('bank', value)}
+          />
+          <VoucherField
+            label="Account Number"
+            value={statement.account_number}
+            onChange={(value) => setStatementField('account_number', value)}
+          />
+          <VoucherField
+            label="Statement Period"
+            value={statement.statement_period}
+            onChange={(value) => setStatementField('statement_period', value)}
+          />
+        </div>
+      </VoucherSection>
 
       <div className="bank-summary-grid">
         <div className="bank-summary-tile">
@@ -700,12 +680,17 @@ function BankStatementVouchers({ statement, onStatementChange }) {
         {transactions.map((transaction, transactionIndex) => (
           <section
             className={`transaction-voucher ${transaction.direction || ''}`}
-            key={`${transaction.transaction_number}-${transactionIndex}`}
+            key={`${transaction.tran_id || transaction.reference || transactionIndex}-${transactionIndex}`}
           >
             <div className="transaction-voucher-header">
               <div>
                 <span className="transaction-label">Voucher {transactionIndex + 1}</span>
-                <h2>{transaction.party?.name || transaction.party?.identifier || 'Unknown Party'}</h2>
+                <h2>
+                  {transaction.party_name ||
+                    transaction.party_identifier ||
+                    transaction.description ||
+                    'Unknown Party'}
+                </h2>
               </div>
               <div className="amount-pill">
                 <span>{transaction.direction || 'direction'}</span>
@@ -715,21 +700,24 @@ function BankStatementVouchers({ statement, onStatementChange }) {
 
             <div className="voucher-grid">
               <VoucherField
+                label="Tran ID"
+                value={transaction.tran_id}
+                onChange={(value) => setTransactionField(transactionIndex, 'tran_id', value)}
+              />
+              <VoucherField
                 label="Value Date"
                 value={transaction.value_date}
                 onChange={(value) => setTransactionField(transactionIndex, 'value_date', value)}
               />
               <VoucherField
-                label="Payment Mode"
-                value={transaction.payment_mode}
-                onChange={(value) => setTransactionField(transactionIndex, 'payment_mode', value)}
+                label="Txn Date"
+                value={transaction.txn_date}
+                onChange={(value) => setTransactionField(transactionIndex, 'txn_date', value)}
               />
               <VoucherField
-                label="Transaction Number"
-                value={transaction.transaction_number}
-                onChange={(value) =>
-                  setTransactionField(transactionIndex, 'transaction_number', value)
-                }
+                label="Mode"
+                value={transaction.mode}
+                onChange={(value) => setTransactionField(transactionIndex, 'mode', value)}
               />
               <label className="voucher-field">
                 <span>Direction</span>
@@ -745,19 +733,45 @@ function BankStatementVouchers({ statement, onStatementChange }) {
                 </select>
               </label>
               <VoucherField
-                label="Party Name"
-                value={transaction.party?.name}
-                onChange={(value) => setPartyField(transactionIndex, 'name', value)}
-              />
-              <VoucherField
-                label="Party Identifier"
-                value={transaction.party?.identifier}
-                onChange={(value) => setPartyField(transactionIndex, 'identifier', value)}
-              />
-              <VoucherField
                 label="Amount"
                 value={transaction.amount}
                 onChange={(value) => setTransactionField(transactionIndex, 'amount', value)}
+              />
+              <VoucherField
+                label="Reference"
+                value={transaction.reference}
+                onChange={(value) => setTransactionField(transactionIndex, 'reference', value)}
+              />
+              <VoucherField
+                label="Party Name"
+                value={transaction.party_name}
+                onChange={(value) => setTransactionField(transactionIndex, 'party_name', value)}
+              />
+              <VoucherField
+                label="Party Identifier"
+                value={transaction.party_identifier}
+                onChange={(value) => setTransactionField(transactionIndex, 'party_identifier', value)}
+              />
+              <VoucherField
+                label="IFSC"
+                value={transaction.ifsc}
+                onChange={(value) => setTransactionField(transactionIndex, 'ifsc', value)}
+              />
+              <VoucherField
+                label="Phone"
+                value={transaction.phone}
+                onChange={(value) => setTransactionField(transactionIndex, 'phone', value)}
+              />
+              <VoucherField
+                label="Balance"
+                value={transaction.balance}
+                onChange={(value) => setTransactionField(transactionIndex, 'balance', value)}
+              />
+              <VoucherField
+                label="Description"
+                value={transaction.description}
+                multiline
+                onChange={(value) => setTransactionField(transactionIndex, 'description', value)}
               />
             </div>
           </section>
@@ -849,7 +863,7 @@ function FilePreviewPage({ selectedFile, onBack }) {
   const splitPaneRef = useRef(null);
   const parsePaneRef = useRef(null);
   const [previewUrl, setPreviewUrl] = useState('');
-  const [spreadsheetRows, setSpreadsheetRows] = useState([]);
+  const [spreadsheetSheets, setSpreadsheetSheets] = useState([]);
   const [previewError, setPreviewError] = useState('');
   const [voucherData, setVoucherData] = useState(null);
   const [parseStatus, setParseStatus] = useState('idle');
@@ -907,7 +921,11 @@ function FilePreviewPage({ selectedFile, onBack }) {
       setParseStatus('complete');
     } catch (error) {
       setParseStatus('error');
-      setParseError(error.message || 'The backend could not parse this file.');
+      if (error instanceof TypeError) {
+        setParseError(`Could not reach the backend at ${API_BASE_URL}. Make sure it is running.`);
+      } else {
+        setParseError(error.message || 'The backend could not parse this file.');
+      }
     }
   };
 
@@ -918,7 +936,7 @@ function FilePreviewPage({ selectedFile, onBack }) {
 
     const { file } = selectedFile;
     setPreviewError('');
-    setSpreadsheetRows([]);
+    setSpreadsheetSheets([]);
     setVoucherData(null);
     setParseStatus('idle');
     setParseError('');
@@ -945,15 +963,21 @@ function FilePreviewPage({ selectedFile, onBack }) {
         try {
           const XLSX = await import('xlsx');
           const workbook = XLSX.read(event.target.result, { type: 'array' });
-          const [firstSheetName] = workbook.SheetNames;
-          const firstSheet = workbook.Sheets[firstSheetName];
-          const rows = XLSX.utils.sheet_to_json(firstSheet, {
-            blankrows: false,
-            defval: '',
-            header: 1,
-          });
+          const sheets = workbook.SheetNames.map((sheetName) => {
+            const sheet = workbook.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(sheet, {
+              blankrows: false,
+              defval: '',
+              header: 1,
+            });
 
-          setSpreadsheetRows(rows.slice(0, 80));
+            return {
+              name: sheetName,
+              rows,
+            };
+          }).filter((sheet) => sheet.rows.length > 0);
+
+          setSpreadsheetSheets(sheets);
         } catch {
           setPreviewError('This spreadsheet could not be previewed.');
         }
@@ -1006,18 +1030,28 @@ function FilePreviewPage({ selectedFile, onBack }) {
 
           {isSpreadsheet(file) && (
             <div className="spreadsheet-preview">
-              {spreadsheetRows.length > 0 ? (
-                <table>
-                  <tbody>
-                    {spreadsheetRows.map((row, rowIndex) => (
-                      <tr key={`row-${rowIndex}`}>
-                        {row.map((cell, cellIndex) => (
-                          <td key={`cell-${rowIndex}-${cellIndex}`}>{String(cell)}</td>
+              {spreadsheetSheets.length > 0 ? (
+                spreadsheetSheets.map((sheet) => (
+                  <div className="spreadsheet-sheet" key={sheet.name}>
+                    <div className="spreadsheet-sheet-header">
+                      <strong>{sheet.name}</strong>
+                      <span>{sheet.rows.length} rows</span>
+                    </div>
+                    <table>
+                      <tbody>
+                        {sheet.rows.map((row, rowIndex) => (
+                          <tr key={`${sheet.name}-row-${rowIndex}`}>
+                            {row.map((cell, cellIndex) => (
+                              <td key={`${sheet.name}-cell-${rowIndex}-${cellIndex}`}>
+                                {String(cell)}
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                      </tbody>
+                    </table>
+                  </div>
+                ))
               ) : (
                 <p>{previewError || 'Preparing spreadsheet preview...'}</p>
               )}
