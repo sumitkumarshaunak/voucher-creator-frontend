@@ -432,11 +432,17 @@ select:focus,
 
 .parse-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   justify-content: flex-end;
   margin-bottom: 14px;
 }
 
 .post-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-height: 38px;
   padding: 0 18px;
   border: 1px solid #172033;
@@ -447,14 +453,61 @@ select:focus,
   font-weight: 800;
 }
 
+.post-button:disabled {
+  border-color: #94a3b8;
+  background: #94a3b8;
+  cursor: wait;
+}
+
 .post-button:hover {
   border-color: #2f3c52;
   background: #2f3c52;
 }
 
+.post-button:disabled:hover {
+  border-color: #94a3b8;
+  background: #94a3b8;
+}
+
 .post-button:focus-visible {
   outline: 3px solid rgba(23, 32, 51, 0.18);
   outline-offset: 2px;
+}
+
+.tally-button {
+  border-color: #0f766e;
+  background: #0f766e;
+}
+
+.tally-button:hover {
+  border-color: #115e59;
+  background: #115e59;
+}
+
+.tally-button:disabled,
+.tally-button:disabled:hover {
+  border-color: #94a3b8;
+  background: #94a3b8;
+}
+
+.tally-status {
+  margin: -4px 0 14px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.tally-status.complete {
+  border: 1px solid #a7f3d0;
+  color: #047857;
+  background: #ecfdf5;
+}
+
+.tally-status.error {
+  border: 1px solid #fecaca;
+  color: #b42318;
+  background: #fff7f7;
 }
 
 .voucher-editor {

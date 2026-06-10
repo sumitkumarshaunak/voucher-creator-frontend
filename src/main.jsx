@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowLeft, Upload } from 'lucide-react';
+import { ArrowLeft, Send, Upload } from 'lucide-react';
 import './styles.css';
 
 const uploadItems = [
@@ -182,6 +182,44 @@ function cloneVoucherData(data) {
   return JSON.parse(JSON.stringify(data));
 }
 
+function normalizeLooseDate(value) {
+  if (!value) {
+    return value;
+  }
+
+  const text = String(value).trim();
+  const match = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/);
+
+  if (!match) {
+    return value;
+  }
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3]);
+
+  if (!year || month < 1 || month > 12 || day < 1) {
+    return value;
+  }
+
+  return [
+    '01',
+    String(month).padStart(2, '0'),
+    String(year),
+  ].join('-');
+}
+
+function normalizeTallyPayloadDate(fileId, data) {
+  if (fileId === 'bank-statement') {
+    return data;
+  }
+
+  const normalized = cloneVoucherData(data);
+  normalized.invoice_date = normalizeLooseDate(normalized.invoice_date);
+  normalized.ack_date = normalizeLooseDate(normalized.ack_date);
+  return normalized;
+}
+
 function emptyParty() {
   return {
     name: '',
@@ -239,25 +277,44 @@ function normalizeInvoiceResult(result) {
 }
 
 function normalizeBankStatementResult(result) {
+  const transactions = (result?.transactions || []).map((transaction) => ({
+    tran_id: transaction.tran_id ?? '',
+    value_date: transaction.value_date ?? '',
+    txn_date: transaction.txn_date ?? '',
+    description: transaction.description ?? '',
+    mode: transaction.mode ?? transaction.payment_mode ?? '',
+    direction: transaction.direction ?? '',
+    amount: transaction.amount ?? '',
+    reference: transaction.reference ?? transaction.transaction_number ?? '',
+    party_name: transaction.party_name ?? transaction.party?.name ?? '',
+    party_identifier: transaction.party_identifier ?? transaction.party?.identifier ?? '',
+    ifsc: transaction.ifsc ?? '',
+    balance: transaction.balance ?? '',
+  }));
+  const partyNamesByIdentifier = buildPartyNamesByIdentifier(transactions);
+
   return {
     bank: result?.bank ?? '',
     account_number: result?.account_number ?? '',
     statement_period: result?.statement_period ?? '',
-    transactions: (result?.transactions || []).map((transaction) => ({
-      tran_id: transaction.tran_id ?? '',
-      value_date: transaction.value_date ?? '',
-      txn_date: transaction.txn_date ?? '',
-      description: transaction.description ?? '',
-      mode: transaction.mode ?? transaction.payment_mode ?? '',
-      direction: transaction.direction ?? '',
-      amount: transaction.amount ?? '',
-      reference: transaction.reference ?? transaction.transaction_number ?? '',
-      party_name: transaction.party_name ?? transaction.party?.name ?? '',
-      party_identifier: transaction.party_identifier ?? transaction.party?.identifier ?? '',
-      ifsc: transaction.ifsc ?? '',
-      balance: transaction.balance ?? '',
+    transactions: transactions.map((transaction) => ({
+      ...transaction,
+      party_name:
+        partyNamesByIdentifier.get(String(transaction.party_identifier).trim()) ||
+        transaction.party_name,
     })),
   };
+}
+
+function buildPartyNamesByIdentifier(transactions) {
+  return transactions.reduce((partyNames, transaction) => {
+    const partyIdentifier = String(transaction.party_identifier ?? '').trim();
+    const partyName = String(transaction.party_name ?? '').trim();
+    if (partyIdentifier && partyName && !partyNames.has(partyIdentifier)) {
+      partyNames.set(partyIdentifier, partyName);
+    }
+    return partyNames;
+  }, new Map());
 }
 
 function getBackendDocumentType(fileId) {
@@ -1162,6 +1219,8 @@ function FilePreviewPage({ selectedFile, onBack }) {
   const [voucherData, setVoucherData] = useState(null);
   const [parseStatus, setParseStatus] = useState('idle');
   const [parseError, setParseError] = useState('');
+  const [tallyStatus, setTallyStatus] = useState('idle');
+  const [tallyMessage, setTallyMessage] = useState('');
   const [leftPaneWidth, setLeftPaneWidth] = useState(58);
 
   const handleResizeStart = (event) => {
@@ -1213,6 +1272,8 @@ function FilePreviewPage({ selectedFile, onBack }) {
 
       setVoucherData(normalizeParsedResult(selectedFile.id, payload.result));
       setParseStatus('complete');
+      setTallyStatus('idle');
+      setTallyMessage('');
     } catch (error) {
       setParseStatus('error');
       if (error instanceof TypeError) {
@@ -1234,6 +1295,8 @@ function FilePreviewPage({ selectedFile, onBack }) {
     setVoucherData(null);
     setParseStatus('idle');
     setParseError('');
+    setTallyStatus('idle');
+    setTallyMessage('');
 
     if (isPdf(file)) {
       setPreviewUrl('');
@@ -1295,6 +1358,47 @@ function FilePreviewPage({ selectedFile, onBack }) {
 
   const handlePost = () => {
     createOutputPdf(voucherData, `${label} Output`, selectedFile.id);
+  };
+
+  const handlePostToTally = async () => {
+    setTallyStatus('loading');
+    setTallyMessage('');
+
+    try {
+      const tallyData = normalizeTallyPayloadDate(selectedFile.id, voucherData);
+      if (tallyData !== voucherData) {
+        setVoucherData(tallyData);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/post-to-tally`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          document_type: getBackendDocumentType(selectedFile.id),
+          source: selectedFile.id,
+          data: tallyData,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.detail || 'Tally rejected this voucher.');
+      }
+
+      const created = payload.tally?.created ?? payload.posted;
+      setTallyStatus('complete');
+      setTallyMessage(`Posted ${created} voucher${created === 1 ? '' : 's'} to Tally.`);
+    } catch (error) {
+      setTallyStatus('error');
+      if (error instanceof TypeError) {
+        setTallyMessage(`Could not reach the backend at ${API_BASE_URL}. Make sure it is running.`);
+      } else {
+        setTallyMessage(error.message || 'Could not post this voucher to Tally.');
+      }
+    }
   };
 
   if (!selectedFile) {
@@ -1376,7 +1480,21 @@ function FilePreviewPage({ selectedFile, onBack }) {
               <button type="button" className="post-button" onClick={handlePost}>
                 Post
               </button>
+              <button
+                type="button"
+                className="post-button tally-button"
+                disabled={tallyStatus === 'loading'}
+                onClick={handlePostToTally}
+              >
+                <Send aria-hidden="true" size={16} />
+                <span>{tallyStatus === 'loading' ? 'Posting...' : 'Post to Tally'}</span>
+              </button>
             </div>
+            {tallyMessage && (
+              <p className={`tally-status ${tallyStatus}`} role={tallyStatus === 'error' ? 'alert' : 'status'}>
+                {tallyMessage}
+              </p>
+            )}
             {selectedFile.id === 'bank-statement' ? (
               <BankStatementVouchers statement={voucherData} onStatementChange={setVoucherData} />
             ) : (
