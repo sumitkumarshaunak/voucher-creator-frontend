@@ -109,7 +109,6 @@ const parsedBankStatementJson = {
   statement_period: 'From 01/05/2026 To 01/06/2026',
   transactions: [
     {
-      tran_id: 'S80780973',
       value_date: '2026-05-01',
       txn_date: '2026-05-01 07:51:08 AM',
       description: 'RTGS/ICICR42026050100502895/HDFC0001968/BHAGWATITRANSPORT CO',
@@ -123,7 +122,6 @@ const parsedBankStatementJson = {
       balance: 826288.1,
     },
     {
-      tran_id: 'S86465177',
       value_date: '2026-05-01',
       txn_date: '2026-05-01 07:00:05 PM',
       description: 'RTGS-UTIBR72026050100131060-ULTRA TECH CEMENT LTD-084010200013129-UTIB0000084',
@@ -137,7 +135,6 @@ const parsedBankStatementJson = {
       balance: 1238325.26,
     },
     {
-      tran_id: 'S87758353',
       value_date: '2026-05-01',
       txn_date: '2026-05-01 10:19:58 PM',
       description: 'UPI/109722460725/HR55AT7757/bachhu.singh4@i//ICI669ab0024aaa4b7387bc8bb48a82d08c/',
@@ -278,7 +275,6 @@ function normalizeInvoiceResult(result) {
 
 function normalizeBankStatementResult(result) {
   const transactions = (result?.transactions || []).map((transaction) => ({
-    tran_id: transaction.tran_id ?? '',
     value_date: transaction.value_date ?? '',
     txn_date: transaction.txn_date ?? '',
     description: transaction.description ?? '',
@@ -1036,7 +1032,7 @@ function BankStatementVouchers({ statement, onStatementChange }) {
         {transactions.map((transaction, transactionIndex) => (
           <section
             className={`transaction-voucher ${transaction.direction || ''}`}
-            key={`${transaction.tran_id || transaction.reference || transactionIndex}-${transactionIndex}`}
+            key={`${transaction.reference || transactionIndex}-${transactionIndex}`}
           >
             <div className="transaction-voucher-header">
               <div>
@@ -1055,11 +1051,6 @@ function BankStatementVouchers({ statement, onStatementChange }) {
             </div>
 
             <div className="voucher-grid">
-              <VoucherField
-                label="Tran ID"
-                value={transaction.tran_id}
-                onChange={(value) => setTransactionField(transactionIndex, 'tran_id', value)}
-              />
               <VoucherField
                 label="Value Date"
                 value={transaction.value_date}
@@ -1210,7 +1201,7 @@ function PdfPreview({ file }) {
   );
 }
 
-function FilePreviewPage({ selectedFile, onBack }) {
+function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
   const splitPaneRef = useRef(null);
   const parsePaneRef = useRef(null);
   const [previewUrl, setPreviewUrl] = useState('');
@@ -1365,6 +1356,10 @@ function FilePreviewPage({ selectedFile, onBack }) {
     setTallyMessage('');
 
     try {
+      if (!selectedClient) {
+        throw new Error('Select a client before posting to Tally.');
+      }
+
       const tallyData = normalizeTallyPayloadDate(selectedFile.id, voucherData);
       if (tallyData !== voucherData) {
         setVoucherData(tallyData);
@@ -1378,6 +1373,7 @@ function FilePreviewPage({ selectedFile, onBack }) {
         body: JSON.stringify({
           document_type: getBackendDocumentType(selectedFile.id),
           source: selectedFile.id,
+          company_name: selectedClient,
           data: tallyData,
         }),
       });
@@ -1389,8 +1385,16 @@ function FilePreviewPage({ selectedFile, onBack }) {
       }
 
       const created = payload.tally?.created ?? payload.posted;
+      const skipped = payload.skipped ?? 0;
+      const batches = payload.tally?.batches ?? 0;
       setTallyStatus('complete');
-      setTallyMessage(`Posted ${created} voucher${created === 1 ? '' : 's'} to Tally.`);
+      setTallyMessage(
+        `Posted ${created} voucher${created === 1 ? '' : 's'} to Tally.${
+          batches > 1 ? ` Sent in ${batches} batches.` : ''
+        }${
+          skipped ? ` Skipped ${skipped} already-posted voucher${skipped === 1 ? '' : 's'}.` : ''
+        }`,
+      );
     } catch (error) {
       setTallyStatus('error');
       if (error instanceof TypeError) {
@@ -1483,7 +1487,7 @@ function FilePreviewPage({ selectedFile, onBack }) {
               <button
                 type="button"
                 className="post-button tally-button"
-                disabled={tallyStatus === 'loading'}
+                disabled={tallyStatus === 'loading' || !selectedClient}
                 onClick={handlePostToTally}
               >
                 <Send aria-hidden="true" size={16} />
@@ -1528,6 +1532,45 @@ function App() {
   const [selectedFiles, setSelectedFiles] = useState({});
   const [validationErrors, setValidationErrors] = useState({});
   const [activeFile, setActiveFile] = useState(null);
+  const [clients, setClients] = useState([]);
+  const [selectedClient, setSelectedClient] = useState('');
+  const [clientsStatus, setClientsStatus] = useState('idle');
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadClients() {
+      setClientsStatus('loading');
+      try {
+        const response = await fetch(`${API_BASE_URL}/tally/companies`);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.detail || 'Could not load Tally companies.');
+        }
+
+        const companies = payload.companies || [];
+        if (isCancelled) {
+          return;
+        }
+
+        setClients(companies);
+        setSelectedClient((currentClient) => currentClient || companies[0] || '');
+        setClientsStatus('complete');
+      } catch {
+        if (!isCancelled) {
+          setClients([]);
+          setClientsStatus('error');
+        }
+      }
+    }
+
+    loadClients();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   const handleUploadClick = (id) => {
     fileInputRefs.current[id]?.click();
@@ -1571,7 +1614,13 @@ function App() {
   };
 
   if (activeFile) {
-    return <FilePreviewPage selectedFile={activeFile} onBack={() => setActiveFile(null)} />;
+    return (
+      <FilePreviewPage
+        selectedFile={activeFile}
+        selectedClient={selectedClient}
+        onBack={() => setActiveFile(null)}
+      />
+    );
   }
 
   return (
@@ -1586,14 +1635,29 @@ function App() {
 
         <div className="client-row">
           <label htmlFor="client">Client:</label>
-          <select id="client" name="client" defaultValue="">
-            <option value="" disabled>
-              Select Client
-            </option>
-            <option value="acme-industries">Acme Industries</option>
-            <option value="northstar-trading">Northstar Trading</option>
-            <option value="greenfield-supplies">Greenfield Supplies</option>
-          </select>
+          <div>
+            <select
+              id="client"
+              name="client"
+              value={selectedClient}
+              disabled={clientsStatus === 'loading'}
+              onChange={(event) => setSelectedClient(event.target.value)}
+            >
+              <option value="" disabled>
+                {clientsStatus === 'loading' ? 'Loading clients...' : 'Select Client'}
+              </option>
+              {clients.map((client) => (
+                <option value={client} key={client}>
+                  {client}
+                </option>
+              ))}
+            </select>
+            {clientsStatus === 'error' && (
+              <span className="validation-error" role="alert">
+                Could not load Tally companies.
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="document-list">
