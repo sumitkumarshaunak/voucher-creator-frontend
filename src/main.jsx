@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowLeft, Send, Upload } from 'lucide-react';
+import { ArrowLeft, Plus, RefreshCw, Send, Upload } from 'lucide-react';
 import './styles.css';
 
 const uploadItems = [
@@ -286,11 +286,13 @@ function normalizeBankStatementResult(result) {
     party_identifier: transaction.party_identifier ?? transaction.party?.identifier ?? '',
     ifsc: transaction.ifsc ?? '',
     balance: transaction.balance ?? '',
+    account_name: transaction.account_name ?? transaction.account ?? transaction.party_ledger ?? '',
   }));
   const partyNamesByIdentifier = buildPartyNamesByIdentifier(transactions);
 
   return {
     bank: result?.bank ?? '',
+    bank_account_name: result?.bank_account_name ?? result?.bank_ledger ?? '',
     account_number: result?.account_number ?? '',
     statement_period: result?.statement_period ?? '',
     transactions: transactions.map((transaction) => ({
@@ -347,6 +349,90 @@ function displayValue(value) {
   }
 
   return String(value);
+}
+
+function accountKey(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function findAccount(accounts, accountName) {
+  const key = accountKey(accountName);
+  return accounts.find((account) => accountKey(account.name) === key);
+}
+
+function transactionPartyMatchKeys(transaction) {
+  return [
+    accountKey(transaction.party_identifier),
+    accountKey(transaction.party_name),
+  ].filter(Boolean);
+}
+
+function transactionsShareParty(firstTransaction, secondTransaction) {
+  const firstKeys = new Set(transactionPartyMatchKeys(firstTransaction));
+  if (firstKeys.size === 0) {
+    return false;
+  }
+
+  return transactionPartyMatchKeys(secondTransaction).some((key) => firstKeys.has(key));
+}
+
+function selectedAccountDetail(transaction, accounts) {
+  const account = findAccount(accounts, transaction.account_name);
+  if (account?.parent) {
+    return `${account.name} · ${account.parent}`;
+  }
+
+  return transaction.account_name || '';
+}
+
+function missingBankAccountSelections(statement) {
+  return (statement?.transactions || [])
+    .map((transaction, index) => ({ transaction, index }))
+    .filter(({ transaction }) => !String(transaction.account_name || '').trim());
+}
+
+function invalidBankAccountSelections(statement, accounts) {
+  if (!accounts.length) {
+    return [];
+  }
+
+  return (statement?.transactions || [])
+    .map((transaction, index) => ({ transaction, index }))
+    .filter(
+      ({ transaction }) =>
+        String(transaction.account_name || '').trim() &&
+        !findAccount(accounts, transaction.account_name),
+    );
+}
+
+function missingStatementBankAccount(statement) {
+  return !String(statement?.bank_account_name || '').trim();
+}
+
+function invalidStatementBankAccount(statement, bankAccounts) {
+  if (!bankAccounts.length || missingStatementBankAccount(statement)) {
+    return false;
+  }
+
+  return !findAccount(bankAccounts, statement.bank_account_name);
+}
+
+function numberInputValue(value) {
+  return value === null || value === undefined ? '' : value;
+}
+
+function parsePositiveInteger(value) {
+  const text = String(value ?? '').trim();
+  if (!text) {
+    return null;
+  }
+
+  const number = Number(text);
+  if (!Number.isInteger(number) || number < 1) {
+    return null;
+  }
+
+  return number;
 }
 
 function renderFieldGrid(fields) {
@@ -482,7 +568,7 @@ function renderInvoicePrintHtml(voucher) {
   `;
 }
 
-function renderBankStatementPrintHtml(statement) {
+function renderBankStatementPrintHtml(statement, accounts = []) {
   const transactions = statement.transactions || [];
   const transactionRows = transactions
     .map(
@@ -496,6 +582,7 @@ function renderBankStatementPrintHtml(statement) {
           <td>${escapeHtml(displayValue(transaction.amount))}</td>
           <td>${escapeHtml(displayValue(transaction.reference))}</td>
           <td>${escapeHtml(displayValue(transaction.party_name))}</td>
+          <td>${escapeHtml(displayValue(selectedAccountDetail(transaction, accounts)))}</td>
           <td>${escapeHtml(displayValue(transaction.balance))}</td>
         </tr>
       `,
@@ -507,6 +594,7 @@ function renderBankStatementPrintHtml(statement) {
       <h2>Statement</h2>
       ${renderFieldGrid([
         ['Bank', statement.bank],
+        ['Selected Bank Account', statement.bank_account_name],
         ['Account Number', statement.account_number],
         ['Statement Period', statement.statement_period],
         ['Transactions', transactions.length],
@@ -526,6 +614,7 @@ function renderBankStatementPrintHtml(statement) {
             <th>Amount</th>
             <th>Reference</th>
             <th>Party</th>
+            <th>Selected Account</th>
             <th>Balance</th>
           </tr>
         </thead>
@@ -535,7 +624,7 @@ function renderBankStatementPrintHtml(statement) {
   `;
 }
 
-function createOutputPdf(data, title, fileId) {
+function createOutputPdf(data, title, fileId, accounts = []) {
   const printWindow = window.open('', '_blank');
 
   if (!printWindow) {
@@ -545,7 +634,7 @@ function createOutputPdf(data, title, fileId) {
 
   printWindow.opener = null;
   const outputHtml =
-    fileId === 'bank-statement' ? renderBankStatementPrintHtml(data) : renderInvoicePrintHtml(data);
+    fileId === 'bank-statement' ? renderBankStatementPrintHtml(data, accounts) : renderInvoicePrintHtml(data);
   printWindow.document.write(`
     <!doctype html>
     <html>
@@ -650,9 +739,9 @@ function VoucherField({ label, value, onChange, multiline = false }) {
   );
 }
 
-function VoucherSection({ title, children }) {
+function VoucherSection({ title, children, sectionRef }) {
   return (
-    <section className="voucher-section" aria-label={title}>
+    <section ref={sectionRef} className="voucher-section" aria-label={title}>
       <h2>{title}</h2>
       {children}
     </section>
@@ -723,11 +812,6 @@ function EditableVoucher({ voucher, onVoucherChange }) {
 
   return (
     <div className="voucher-editor">
-      <div className="voucher-editor-header">
-        <p className="eyebrow">Parsed Voucher</p>
-        <h1>{voucher.document_type || 'Voucher'}</h1>
-      </div>
-
       <VoucherSection title="Invoice">
         <div className="voucher-grid">
           <VoucherField
@@ -937,8 +1021,31 @@ function formatMoney(value) {
   });
 }
 
-function BankStatementVouchers({ statement, onStatementChange }) {
+function BankStatementVouchers({
+  statement,
+  onStatementChange,
+  accounts,
+  accountsStatus,
+  accountsMessage,
+  bankAccounts,
+  bankAccountsStatus,
+  bankAccountsMessage,
+  onFetchAccounts,
+  onFetchBankAccounts,
+  onAddAccount,
+}) {
   const transactions = statement.transactions || [];
+  const [selectedTransactions, setSelectedTransactions] = useState(() => new Set());
+  const [bulkAccount, setBulkAccount] = useState('');
+  const [newAccountName, setNewAccountName] = useState('');
+  const [newAccountParent, setNewAccountParent] = useState('Sundry Creditors');
+  const [newAccountStatus, setNewAccountStatus] = useState('idle');
+  const [newAccountError, setNewAccountError] = useState('');
+  const accountsSectionRef = useRef(null);
+  const missingAccounts = missingBankAccountSelections(statement);
+  const selectedVoucherDetails = transactions
+    .map((transaction, index) => ({ transaction, index }))
+    .filter(({ index }) => selectedTransactions.has(index));
   const totals = transactions.reduce(
     (summary, transaction) => {
       const amount = Number(transaction.amount) || 0;
@@ -980,16 +1087,96 @@ function BankStatementVouchers({ statement, onStatementChange }) {
     }));
   };
 
+  const toggleTransactionSelection = (transactionIndex) => {
+    setSelectedTransactions((currentSelection) => {
+      const nextSelection = new Set(currentSelection);
+      if (nextSelection.has(transactionIndex)) {
+        nextSelection.delete(transactionIndex);
+      } else {
+        nextSelection.add(transactionIndex);
+      }
+      return nextSelection;
+    });
+  };
+
+  const selectSamePartyForAccount = (transaction) => {
+    if (!transaction.account_name || transactionPartyMatchKeys(transaction).length === 0) {
+      return;
+    }
+
+    setBulkAccount(transaction.account_name);
+    setSelectedTransactions(
+      new Set(
+        transactions
+          .map((candidate, index) => ({ candidate, index }))
+          .filter(({ candidate }) => transactionsShareParty(transaction, candidate))
+          .map(({ index }) => index),
+      ),
+    );
+    window.setTimeout(() => {
+      accountsSectionRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 0);
+  };
+
+  const applyAccountToSelected = () => {
+    if (!bulkAccount || selectedTransactions.size === 0) {
+      return;
+    }
+
+    onStatementChange((currentStatement) => ({
+      ...currentStatement,
+      transactions: currentStatement.transactions.map((transaction, index) =>
+        selectedTransactions.has(index)
+          ? { ...transaction, account_name: bulkAccount }
+          : transaction,
+      ),
+    }));
+  };
+
+  const handleBulkAccountChange = (accountName) => {
+    setBulkAccount(accountName);
+    if (accountName) {
+      onFetchAccounts();
+    }
+  };
+
+  const handleTransactionAccountChange = (transactionIndex, accountName) => {
+    setTransactionField(transactionIndex, 'account_name', accountName);
+    if (accountName) {
+      onFetchAccounts();
+    }
+  };
+
+  const handleStatementBankAccountChange = (accountName) => {
+    setStatementField('bank_account_name', accountName);
+    if (accountName) {
+      onFetchBankAccounts();
+    }
+  };
+
+  const handleAddAccount = async () => {
+    setNewAccountStatus('loading');
+    setNewAccountError('');
+
+    try {
+      const account = await onAddAccount({
+        name: newAccountName,
+        parent: newAccountParent,
+      });
+      setNewAccountName('');
+      setBulkAccount(account.name);
+      setNewAccountStatus('complete');
+    } catch (error) {
+      setNewAccountStatus('error');
+      setNewAccountError(error.message || 'Could not add this account.');
+    }
+  };
+
   return (
     <div className="bank-voucher-editor">
-      <div className="voucher-editor-header">
-        <p className="eyebrow">Parsed Bank Statement</p>
-        <h1>{statement.bank || 'Bank Statement'}</h1>
-        <p>
-          {statement.account_number || 'No account number'} · {transactions.length} transaction vouchers
-        </p>
-      </div>
-
       <VoucherSection title="Statement">
         <div className="voucher-grid">
           <VoucherField
@@ -997,6 +1184,23 @@ function BankStatementVouchers({ statement, onStatementChange }) {
             value={statement.bank}
             onChange={(value) => setStatementField('bank', value)}
           />
+          <label className="voucher-field">
+            <span>Bank Account</span>
+            <select
+              value={statement.bank_account_name ?? ''}
+              disabled={bankAccountsStatus === 'loading'}
+              onChange={(event) => handleStatementBankAccountChange(event.target.value)}
+            >
+              <option value="">
+                {bankAccountsStatus === 'loading' ? 'Loading bank accounts...' : 'Select bank account'}
+              </option>
+              {bankAccounts.map((account) => (
+                <option value={account.name} key={account.name}>
+                  {account.parent ? `${account.name} (${account.parent})` : account.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <VoucherField
             label="Account Number"
             value={statement.account_number}
@@ -1007,7 +1211,21 @@ function BankStatementVouchers({ statement, onStatementChange }) {
             value={statement.statement_period}
             onChange={(value) => setStatementField('statement_period', value)}
           />
+          <button
+            type="button"
+            className="secondary-action-button fetch-bank-account-button"
+            disabled={bankAccountsStatus === 'loading'}
+            onClick={onFetchBankAccounts}
+          >
+            <RefreshCw aria-hidden="true" size={16} />
+            <span>{bankAccountsStatus === 'loading' ? 'Fetching...' : 'Fetch Bank Accounts'}</span>
+          </button>
         </div>
+        {(bankAccountsMessage || missingStatementBankAccount(statement)) && (
+          <p className={`account-status ${missingStatementBankAccount(statement) ? 'error' : ''}`}>
+            {bankAccountsMessage || 'Select the Tally bank account for this statement.'}
+          </p>
+        )}
       </VoucherSection>
 
       <div className="bank-summary-grid">
@@ -1027,6 +1245,124 @@ function BankStatementVouchers({ statement, onStatementChange }) {
           <small>Credit minus debit</small>
         </div>
       </div>
+
+      <VoucherSection title="Accounts" sectionRef={accountsSectionRef}>
+        <div className="account-toolbar">
+          <label className="voucher-field">
+            <span>Bulk Account</span>
+            <select
+              value={bulkAccount}
+              disabled={accountsStatus === 'loading'}
+              onChange={(event) => handleBulkAccountChange(event.target.value)}
+            >
+              <option value="">
+                {accountsStatus === 'loading' ? 'Loading accounts...' : 'Select account'}
+              </option>
+              {accounts.map((account) => (
+                <option value={account.name} key={account.name}>
+                  {account.parent ? `${account.name} (${account.parent})` : account.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="secondary-action-button"
+            disabled={!bulkAccount || selectedTransactions.size === 0}
+            onClick={applyAccountToSelected}
+          >
+            Apply to selected
+          </button>
+          <button
+            type="button"
+            className="secondary-action-button"
+            disabled={accountsStatus === 'loading'}
+            onClick={onFetchAccounts}
+          >
+            <RefreshCw aria-hidden="true" size={16} />
+            <span>{accountsStatus === 'loading' ? 'Fetching...' : 'Fetch Accounts'}</span>
+          </button>
+          <span className="selection-count">{selectedTransactions.size} selected</span>
+        </div>
+
+        {selectedVoucherDetails.length > 0 && (
+          <div className="selected-voucher-panel">
+            <div className="selected-voucher-header">
+              <strong>Selected Vouchers</strong>
+              <span>
+                {bulkAccount
+                  ? `Ready for ${bulkAccount}`
+                  : 'Choose a bulk account to apply'}
+              </span>
+            </div>
+            <div className="selected-voucher-list">
+              {selectedVoucherDetails.map(({ transaction, index }) => (
+                <div className="selected-voucher-item" key={`selected-${index}`}>
+                  <span>Voucher {index + 1}</span>
+                  <div className="selected-voucher-main">
+                    <strong>
+                      {transaction.party_name ||
+                        transaction.party_identifier ||
+                        transaction.reference ||
+                        'Unknown Party'}
+                    </strong>
+                    <p>{transaction.description || transaction.reference || 'No narration'}</p>
+                  </div>
+                  <em>Rs. {formatMoney(transaction.amount)}</em>
+                  <small>{transaction.account_name || 'No account selected'}</small>
+                  <button
+                    type="button"
+                    className="remove-selected-voucher"
+                    onClick={() => toggleTransactionSelection(index)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="new-account-row">
+          <VoucherField
+            label="New Account"
+            value={newAccountName}
+            onChange={setNewAccountName}
+          />
+          <label className="voucher-field">
+            <span>Parent</span>
+            <select
+              value={newAccountParent}
+              onChange={(event) => setNewAccountParent(event.target.value)}
+            >
+              <option value="Sundry Creditors">Sundry Creditors</option>
+              <option value="Sundry Debtors">Sundry Debtors</option>
+              <option value="Indirect Expenses">Indirect Expenses</option>
+              <option value="Indirect Incomes">Indirect Incomes</option>
+              <option value="Bank Accounts">Bank Accounts</option>
+              <option value="Current Assets">Current Assets</option>
+              <option value="Current Liabilities">Current Liabilities</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="secondary-action-button add-account-button"
+            disabled={!newAccountName.trim() || newAccountStatus === 'loading'}
+            onClick={handleAddAccount}
+          >
+            <Plus aria-hidden="true" size={16} />
+            <span>{newAccountStatus === 'loading' ? 'Adding...' : 'Add Account'}</span>
+          </button>
+        </div>
+
+        {(accountsMessage || newAccountError || missingAccounts.length > 0) && (
+          <p className={`account-status ${missingAccounts.length > 0 ? 'error' : ''}`}>
+            {newAccountError ||
+              accountsMessage ||
+              `${missingAccounts.length} transaction${missingAccounts.length === 1 ? '' : 's'} still need an account.`}
+          </p>
+        )}
+      </VoucherSection>
 
       <div className="transaction-voucher-list">
         {transactions.map((transaction, transactionIndex) => (
@@ -1048,6 +1384,49 @@ function BankStatementVouchers({ statement, onStatementChange }) {
                 <span>{transaction.direction || 'direction'}</span>
                 <strong>Rs. {formatMoney(transaction.amount)}</strong>
               </div>
+            </div>
+
+            <div className="transaction-account-row">
+              <label className="transaction-selector">
+                <input
+                  type="checkbox"
+                  checked={selectedTransactions.has(transactionIndex)}
+                  onChange={() => toggleTransactionSelection(transactionIndex)}
+                />
+                <span>Select</span>
+              </label>
+              <label className="voucher-field">
+                <span>Selected Account</span>
+                <select
+                  value={transaction.account_name ?? ''}
+                  disabled={accountsStatus === 'loading'}
+                  onChange={(event) =>
+                    handleTransactionAccountChange(transactionIndex, event.target.value)
+                  }
+                >
+                  <option value="">
+                    {accountsStatus === 'loading' ? 'Loading accounts...' : 'Select account'}
+                  </option>
+                  {accounts.map((account) => (
+                    <option value={account.name} key={account.name}>
+                      {account.parent ? `${account.name} (${account.parent})` : account.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="match-button"
+                disabled={!transaction.account_name || transactionPartyMatchKeys(transaction).length === 0}
+                onClick={() => selectSamePartyForAccount(transaction)}
+              >
+                Select same party
+              </button>
+              {transaction.account_name && (
+                <span className="account-detail">
+                  {selectedAccountDetail(transaction, accounts)}
+                </span>
+              )}
             </div>
 
             <div className="voucher-grid">
@@ -1204,6 +1583,7 @@ function PdfPreview({ file }) {
 function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
   const splitPaneRef = useRef(null);
   const parsePaneRef = useRef(null);
+  const parseContentRef = useRef(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [spreadsheetSheets, setSpreadsheetSheets] = useState([]);
   const [previewError, setPreviewError] = useState('');
@@ -1212,7 +1592,18 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
   const [parseError, setParseError] = useState('');
   const [tallyStatus, setTallyStatus] = useState('idle');
   const [tallyMessage, setTallyMessage] = useState('');
+  const [tallyAccounts, setTallyAccounts] = useState([]);
+  const [accountsStatus, setAccountsStatus] = useState('idle');
+  const [accountsMessage, setAccountsMessage] = useState('');
+  const [tallyBankAccounts, setTallyBankAccounts] = useState([]);
+  const [bankAccountsStatus, setBankAccountsStatus] = useState('idle');
+  const [bankAccountsMessage, setBankAccountsMessage] = useState('');
   const [leftPaneWidth, setLeftPaneWidth] = useState(58);
+  const [parseRows, setParseRows] = useState({
+    headingRow: '',
+    rowFrom: '',
+    rowTo: '',
+  });
 
   const handleResizeStart = (event) => {
     event.preventDefault();
@@ -1246,6 +1637,43 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
     formData.append('file', selectedFile.file);
     formData.append('document_type', getBackendDocumentType(selectedFile.id));
 
+    const headingRow = parsePositiveInteger(parseRows.headingRow);
+    const rowFrom = parsePositiveInteger(parseRows.rowFrom);
+    const rowTo = parsePositiveInteger(parseRows.rowTo);
+
+    if (parseRows.headingRow && !headingRow) {
+      setParseStatus('error');
+      setParseError('Heading row must be a positive row number.');
+      return;
+    }
+    if (parseRows.rowFrom && !rowFrom) {
+      setParseStatus('error');
+      setParseError('From row must be a positive row number.');
+      return;
+    }
+    if (parseRows.rowTo && !rowTo) {
+      setParseStatus('error');
+      setParseError('To row must be a positive row number.');
+      return;
+    }
+    if (rowFrom && rowTo && rowFrom > rowTo) {
+      setParseStatus('error');
+      setParseError('From row cannot be greater than To row.');
+      return;
+    }
+
+    if (selectedFile.id === 'bank-statement' && isSpreadsheet(selectedFile.file)) {
+      if (headingRow) {
+        formData.append('heading_row', String(headingRow));
+      }
+      if (rowFrom) {
+        formData.append('row_from', String(rowFrom));
+      }
+      if (rowTo) {
+        formData.append('row_to', String(rowTo));
+      }
+    }
+
     setParseStatus('loading');
     setParseError('');
 
@@ -1265,6 +1693,10 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
       setParseStatus('complete');
       setTallyStatus('idle');
       setTallyMessage('');
+      if (selectedFile.id === 'bank-statement') {
+        await loadTallyAccounts();
+        await loadTallyBankAccounts();
+      }
     } catch (error) {
       setParseStatus('error');
       if (error instanceof TypeError) {
@@ -1288,6 +1720,17 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
     setParseError('');
     setTallyStatus('idle');
     setTallyMessage('');
+    setTallyAccounts([]);
+    setAccountsStatus('idle');
+    setAccountsMessage('');
+    setTallyBankAccounts([]);
+    setBankAccountsStatus('idle');
+    setBankAccountsMessage('');
+    setParseRows({
+      headingRow: '',
+      rowFrom: '',
+      rowTo: '',
+    });
 
     if (isPdf(file)) {
       setPreviewUrl('');
@@ -1314,10 +1757,15 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
           const sheets = workbook.SheetNames.map((sheetName) => {
             const sheet = workbook.Sheets[sheetName];
             const rows = XLSX.utils.sheet_to_json(sheet, {
-              blankrows: false,
+              blankrows: true,
               defval: '',
               header: 1,
-            });
+            })
+              .map((row, rowIndex) => ({
+                rowNumber: rowIndex + 1,
+                cells: row,
+              }))
+              .filter((row) => row.cells.some((cell) => String(cell).trim()));
 
             return {
               name: sheetName,
@@ -1342,13 +1790,202 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
   }, [selectedFile]);
 
   useEffect(() => {
-    if (voucherData && parsePaneRef.current) {
-      parsePaneRef.current.scrollTo({ left: 0, top: 0 });
+    if (voucherData && parseContentRef.current) {
+      parseContentRef.current.scrollTo({ left: 0, top: 0 });
     }
   }, [voucherData]);
 
+  const onInvalidBankAccounts = useCallback((invalidSelections) => {
+    const invalidIndexes = new Set(invalidSelections.map(({ index }) => index));
+    setVoucherData((currentData) => ({
+      ...currentData,
+      transactions: (currentData.transactions || []).map((transaction, index) =>
+        invalidIndexes.has(index) ? { ...transaction, account_name: '' } : transaction,
+      ),
+    }));
+    setAccountsMessage(
+      `Cleared ${invalidSelections.length} invalid account selection${
+        invalidSelections.length === 1 ? '' : 's'
+      }. Select an account returned by Tally.`,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (
+      selectedFile.id !== 'bank-statement' ||
+      !voucherData ||
+      accountsStatus !== 'complete' ||
+      tallyAccounts.length === 0
+    ) {
+      return;
+    }
+
+    const invalidSelections = invalidBankAccountSelections(voucherData, tallyAccounts);
+    if (invalidSelections.length === 0) {
+      return;
+    }
+
+    onInvalidBankAccounts(invalidSelections);
+  }, [accountsStatus, onInvalidBankAccounts, selectedFile.id, tallyAccounts, voucherData]);
+
+  useEffect(() => {
+    if (
+      selectedFile.id !== 'bank-statement' ||
+      !voucherData ||
+      bankAccountsStatus !== 'complete' ||
+      tallyBankAccounts.length === 0 ||
+      !invalidStatementBankAccount(voucherData, tallyBankAccounts)
+    ) {
+      return;
+    }
+
+    setVoucherData((currentData) => ({
+      ...currentData,
+      bank_account_name: '',
+    }));
+    setBankAccountsMessage('Cleared an invalid bank account selection. Select a bank account returned by Tally.');
+  }, [bankAccountsStatus, selectedFile.id, tallyBankAccounts, voucherData]);
+
+  const loadTallyAccounts = async () => {
+    setAccountsStatus('loading');
+    setAccountsMessage('');
+
+    try {
+      if (!selectedClient) {
+        throw new Error('Select a client before loading Tally accounts.');
+      }
+
+      const params = new URLSearchParams({ company_name: selectedClient });
+      const response = await fetch(`${API_BASE_URL}/tally/accounts?${params.toString()}`);
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.detail || 'Could not load Tally accounts.');
+      }
+
+      setTallyAccounts(payload.accounts || []);
+      setAccountsStatus('complete');
+    } catch (error) {
+      setAccountsStatus('error');
+      if (error instanceof TypeError) {
+        setAccountsMessage(`Could not reach the backend at ${API_BASE_URL}. Make sure it is running.`);
+      } else {
+        setAccountsMessage(error.message || 'Could not load Tally accounts.');
+      }
+    }
+  };
+
+  const loadTallyBankAccounts = async () => {
+    setBankAccountsStatus('loading');
+    setBankAccountsMessage('');
+
+    try {
+      if (!selectedClient) {
+        throw new Error('Select a client before loading Tally bank accounts.');
+      }
+
+      const params = new URLSearchParams({ company_name: selectedClient });
+      const response = await fetch(`${API_BASE_URL}/tally/bank-accounts?${params.toString()}`);
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.detail || 'Could not load Tally bank accounts.');
+      }
+
+      setTallyBankAccounts(payload.accounts || []);
+      setBankAccountsStatus('complete');
+    } catch (error) {
+      setBankAccountsStatus('error');
+      if (error instanceof TypeError) {
+        setBankAccountsMessage(`Could not reach the backend at ${API_BASE_URL}. Make sure it is running.`);
+      } else {
+        setBankAccountsMessage(error.message || 'Could not load Tally bank accounts.');
+      }
+    }
+  };
+
+  const handleAddTallyAccount = async ({ name, parent }) => {
+    if (!selectedClient) {
+      throw new Error('Select a client before adding an account.');
+    }
+
+    const response = await fetch(`${API_BASE_URL}/tally/accounts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        company_name: selectedClient,
+        name,
+        parent,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(payload.detail || 'Could not add this account.');
+    }
+
+    const account = payload.account;
+    setTallyAccounts((currentAccounts) => {
+      const withoutDuplicate = currentAccounts.filter(
+        (currentAccount) => accountKey(currentAccount.name) !== accountKey(account.name),
+      );
+      return [...withoutDuplicate, account].sort((first, second) =>
+        first.name.localeCompare(second.name),
+      );
+    });
+    setAccountsStatus('complete');
+    setAccountsMessage('');
+    return account;
+  };
+
+  const ensureBankAccountsSelected = () => {
+    if (selectedFile.id !== 'bank-statement') {
+      return true;
+    }
+
+    if (missingStatementBankAccount(voucherData)) {
+      setTallyStatus('error');
+      setTallyMessage('Select the Tally bank account for this bank statement before continuing.');
+      return false;
+    }
+
+    if (invalidStatementBankAccount(voucherData, tallyBankAccounts)) {
+      setTallyStatus('error');
+      setTallyMessage('The selected bank account is not valid in Tally. Fetch bank accounts and select a valid bank account.');
+      return false;
+    }
+
+    const invalidSelections = invalidBankAccountSelections(voucherData, tallyAccounts);
+    if (invalidSelections.length > 0) {
+      const firstInvalid = invalidSelections[0].index + 1;
+      setTallyStatus('error');
+      setTallyMessage(
+        `Voucher ${firstInvalid} uses an account that is not valid in Tally. Fetch accounts and select a valid account before continuing.`,
+      );
+      return false;
+    }
+
+    const missingAccounts = missingBankAccountSelections(voucherData);
+    if (missingAccounts.length === 0) {
+      return true;
+    }
+
+    const firstMissing = missingAccounts[0].index + 1;
+    setTallyStatus('error');
+    setTallyMessage(
+      `Select an account for every transaction before continuing. Voucher ${firstMissing} is missing an account.`,
+    );
+    return false;
+  };
+
   const handlePost = () => {
-    createOutputPdf(voucherData, `${label} Output`, selectedFile.id);
+    if (!ensureBankAccountsSelected()) {
+      return;
+    }
+
+    createOutputPdf(voucherData, `${label} Output`, selectedFile.id, tallyAccounts);
   };
 
   const handlePostToTally = async () => {
@@ -1358,6 +1995,9 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
     try {
       if (!selectedClient) {
         throw new Error('Select a client before posting to Tally.');
+      }
+      if (!ensureBankAccountsSelected()) {
+        return;
       }
 
       const tallyData = normalizeTallyPayloadDate(selectedFile.id, voucherData);
@@ -1410,6 +2050,47 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
   }
 
   const { file, label } = selectedFile;
+  const headingRowNumber = parsePositiveInteger(parseRows.headingRow);
+  const rowFromNumber = parsePositiveInteger(parseRows.rowFrom);
+  const rowToNumber = parsePositiveInteger(parseRows.rowTo);
+  const showSpreadsheetParseControls = selectedFile.id === 'bank-statement' && isSpreadsheet(file);
+  const parsedHeader = voucherData
+    ? selectedFile.id === 'bank-statement'
+      ? {
+          eyebrow: 'Parsed Bank Statement',
+          title: `${voucherData.bank || 'Bank Statement'} · ${
+            (voucherData.transactions || []).length
+          } transaction vouchers`,
+          subtitle: '',
+        }
+      : {
+          eyebrow: 'Parsed Voucher',
+          title: voucherData.document_type || 'Voucher',
+          subtitle: [voucherData.invoice_no, voucherData.invoice_date].filter(Boolean).join(' · '),
+        }
+    : null;
+
+  const setParseRowField = (field, value) => {
+    setParseRows((currentRows) => ({
+      ...currentRows,
+      [field]: value,
+    }));
+  };
+
+  const spreadsheetRowClassName = (rowNumber) => {
+    const classNames = [];
+    if (headingRowNumber === rowNumber) {
+      classNames.push('heading-row');
+    }
+    if (
+      (!rowFromNumber || rowNumber >= rowFromNumber) &&
+      (!rowToNumber || rowNumber <= rowToNumber) &&
+      (rowFromNumber || rowToNumber)
+    ) {
+      classNames.push('selected-row');
+    }
+    return classNames.join(' ');
+  };
 
   return (
     <main
@@ -1445,10 +2126,16 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
                     </div>
                     <table>
                       <tbody>
-                        {sheet.rows.map((row, rowIndex) => (
-                          <tr key={`${sheet.name}-row-${rowIndex}`}>
-                            {row.map((cell, cellIndex) => (
-                              <td key={`${sheet.name}-cell-${rowIndex}-${cellIndex}`}>
+                        {sheet.rows.map((row) => (
+                          <tr
+                            className={spreadsheetRowClassName(row.rowNumber)}
+                            key={`${sheet.name}-row-${row.rowNumber}`}
+                          >
+                            <th scope="row" className="row-number-cell">
+                              {row.rowNumber}
+                            </th>
+                            {row.cells.map((cell, cellIndex) => (
+                              <td key={`${sheet.name}-cell-${row.rowNumber}-${cellIndex}`}>
                                 {String(cell)}
                               </td>
                             ))}
@@ -1480,33 +2167,86 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
       <aside ref={parsePaneRef} className="parse-pane" aria-label="Parse document">
         {voucherData ? (
           <>
-            <div className="parse-toolbar">
-              <button type="button" className="post-button" onClick={handlePost}>
-                Post
-              </button>
-              <button
-                type="button"
-                className="post-button tally-button"
-                disabled={tallyStatus === 'loading' || !selectedClient}
-                onClick={handlePostToTally}
-              >
-                <Send aria-hidden="true" size={16} />
-                <span>{tallyStatus === 'loading' ? 'Posting...' : 'Post to Tally'}</span>
-              </button>
+            <div className="tally-action-bar">
+              <div className="parsed-pane-title">
+                <p className="eyebrow">{parsedHeader.eyebrow}</p>
+                <h1>{parsedHeader.title}</h1>
+                {parsedHeader.subtitle && <p>{parsedHeader.subtitle}</p>}
+              </div>
+              <div className="parse-toolbar">
+                <button type="button" className="post-button" onClick={handlePost}>
+                  Print
+                </button>
+                <button
+                  type="button"
+                  className="post-button tally-button"
+                  disabled={tallyStatus === 'loading' || !selectedClient}
+                  onClick={handlePostToTally}
+                >
+                  <Send aria-hidden="true" size={16} />
+                  <span>{tallyStatus === 'loading' ? 'Posting...' : 'Post to Tally'}</span>
+                </button>
+              </div>
+              {tallyMessage && (
+                <p className={`tally-status ${tallyStatus}`} role={tallyStatus === 'error' ? 'alert' : 'status'}>
+                  {tallyMessage}
+                </p>
+              )}
             </div>
-            {tallyMessage && (
-              <p className={`tally-status ${tallyStatus}`} role={tallyStatus === 'error' ? 'alert' : 'status'}>
-                {tallyMessage}
-              </p>
-            )}
-            {selectedFile.id === 'bank-statement' ? (
-              <BankStatementVouchers statement={voucherData} onStatementChange={setVoucherData} />
-            ) : (
-              <EditableVoucher voucher={voucherData} onVoucherChange={setVoucherData} />
-            )}
+            <div ref={parseContentRef} className="parsed-scroll-content">
+              {selectedFile.id === 'bank-statement' ? (
+                <BankStatementVouchers
+                  statement={voucherData}
+                  onStatementChange={setVoucherData}
+                  accounts={tallyAccounts}
+                  accountsStatus={accountsStatus}
+                  accountsMessage={accountsMessage}
+                  bankAccounts={tallyBankAccounts}
+                  bankAccountsStatus={bankAccountsStatus}
+                  bankAccountsMessage={bankAccountsMessage}
+                  onFetchAccounts={loadTallyAccounts}
+                  onFetchBankAccounts={loadTallyBankAccounts}
+                  onAddAccount={handleAddTallyAccount}
+                />
+              ) : (
+                <EditableVoucher voucher={voucherData} onVoucherChange={setVoucherData} />
+              )}
+            </div>
           </>
         ) : (
           <div className="parse-action">
+            {showSpreadsheetParseControls && (
+              <div className="parse-row-controls">
+                <label className="voucher-field">
+                  <span>Heading Row</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={numberInputValue(parseRows.headingRow)}
+                    onChange={(event) => setParseRowField('headingRow', event.target.value)}
+                  />
+                </label>
+                <label className="voucher-field">
+                  <span>From Row</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={numberInputValue(parseRows.rowFrom)}
+                    onChange={(event) => setParseRowField('rowFrom', event.target.value)}
+                    placeholder={headingRowNumber ? String(headingRowNumber + 1) : ''}
+                  />
+                </label>
+                <label className="voucher-field">
+                  <span>To Row</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={numberInputValue(parseRows.rowTo)}
+                    onChange={(event) => setParseRowField('rowTo', event.target.value)}
+                  />
+                </label>
+              </div>
+            )}
             <button
               type="button"
               className="parse-button"
