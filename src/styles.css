@@ -900,6 +900,170 @@ select:focus,
   min-height: 36px;
 }
 
+.account-period-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.account-period-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) minmax(140px, 0.65fr) minmax(140px, 0.65fr) minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.skip-voucher-types {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.skip-voucher-types legend {
+  color: #52637a;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.skip-voucher-types div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skip-voucher-types label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid #d1dae8;
+  border-radius: 6px;
+  color: #243047;
+  background: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.skip-voucher-types input {
+  width: 14px;
+  height: 14px;
+  accent-color: #1f6feb;
+}
+
+.account-total-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 8px;
+}
+
+.account-total-grid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dce3ee;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.account-total-grid span {
+  overflow: hidden;
+  color: #52637a;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.account-total-grid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #172033;
+  font-size: 0.9rem;
+}
+
+.account-voucher-details {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dce3ee;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.account-voucher-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #172033;
+}
+
+.account-voucher-header span {
+  color: #52637a;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.account-voucher-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.account-voucher-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.account-voucher-table th,
+.account-voucher-table td {
+  max-width: 260px;
+  padding: 8px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.account-voucher-table th {
+  color: #52637a;
+  background: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.account-voucher-table td {
+  color: #243047;
+  overflow-wrap: anywhere;
+}
+
+.account-voucher-table td:nth-child(4),
+.account-voucher-table td:nth-child(5) {
+  color: #172033;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.account-voucher-table small {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
 .selection-count,
 .account-detail {
   color: #52637a;
@@ -1200,6 +1364,7 @@ select:focus,
 
   .account-toolbar,
   .new-account-row,
+  .account-period-controls,
   .transaction-account-row {
     grid-template-columns: 1fr;
   }
@@ -1220,6 +1385,10 @@ select:focus,
 
 @container (max-width: 620px) {
   .voucher-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .account-period-controls {
     grid-template-columns: 1fr;
   }
 

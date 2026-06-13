@@ -31,6 +31,18 @@ const uploadItems = [
   },
 ];
 
+const accountVoucherTypes = [
+  'Payment',
+  'Receipt',
+  'Contra',
+  'Journal',
+  'Sales',
+  'Purchase',
+  'Invoice',
+  'Debit Note',
+  'Credit Note',
+];
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
 const parsedVoucherJson = {
@@ -355,9 +367,23 @@ function accountKey(value) {
   return String(value ?? '').trim().toLowerCase();
 }
 
-function findAccount(accounts, accountName) {
-  const key = accountKey(accountName);
-  return accounts.find((account) => accountKey(account.name) === key);
+function accountName(account) {
+  return String(account?.name ?? account?.ledger_name ?? account?.account_name ?? '').trim();
+}
+
+function findAccount(accounts, selectedAccountName) {
+  const key = accountKey(selectedAccountName);
+  return accounts.find((account) => accountKey(accountName(account)) === key);
+}
+
+function accountDisplayName(account) {
+  const name = accountName(account);
+  if (!name) {
+    return '';
+  }
+
+  const parent = String(account?.parent ?? '').trim();
+  return parent ? `${name} (${parent})` : name;
 }
 
 function transactionPartyMatchKeys(transaction) {
@@ -1021,6 +1047,74 @@ function formatMoney(value) {
   });
 }
 
+function toDateInputValue(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  const isoMatch = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+  }
+
+  const numericMatch = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/);
+  if (numericMatch) {
+    const year = numericMatch[3].length === 2 ? `20${numericMatch[3]}` : numericMatch[3];
+    return `${year}-${numericMatch[2].padStart(2, '0')}-${numericMatch[1].padStart(2, '0')}`;
+  }
+
+  const monthNames = {
+    jan: '01',
+    feb: '02',
+    mar: '03',
+    apr: '04',
+    may: '05',
+    jun: '06',
+    jul: '07',
+    aug: '08',
+    sep: '09',
+    sept: '09',
+    oct: '10',
+    nov: '11',
+    dec: '12',
+  };
+  const textMatch = text.match(/^(\d{1,2})[-\s]([A-Za-z]{3,})[-\s](\d{2}|\d{4})$/);
+  if (textMatch) {
+    const monthKey = textMatch[2].toLowerCase();
+    const month = monthNames[monthKey.slice(0, 4)] || monthNames[monthKey.slice(0, 3)];
+    const year = textMatch[3].length === 2 ? `20${textMatch[3]}` : textMatch[3];
+    if (month) {
+      return `${year}-${month}-${textMatch[1].padStart(2, '0')}`;
+    }
+  }
+
+  return '';
+}
+
+function statementPeriodDateInputs(statementPeriod) {
+  const text = String(statementPeriod || '');
+  const match = text.match(/from\s+(.+?)\s+to\s+(.+)$/i);
+  if (!match) {
+    return { fromDate: '', toDate: '' };
+  }
+
+  return {
+    fromDate: toDateInputValue(match[1]),
+    toDate: toDateInputValue(match[2]),
+  };
+}
+
+function voucherOppositeLedgerText(voucher) {
+  return (voucher?.opposite_ledgers || [])
+    .map((ledger) => {
+      const amount = Number(ledger.amount) || 0;
+      const suffix = amount ? ` ${ledger.direction || ''} Rs. ${formatMoney(amount)}` : '';
+      return `${ledger.name || 'Unknown'}${suffix}`;
+    })
+    .join(', ');
+}
+
 function BankStatementVouchers({
   statement,
   onStatementChange,
@@ -1033,14 +1127,25 @@ function BankStatementVouchers({
   onFetchAccounts,
   onFetchBankAccounts,
   onAddAccount,
+  onFetchAccountTotals,
 }) {
   const transactions = statement.transactions || [];
+  const statementPeriodDates = statementPeriodDateInputs(statement.statement_period);
   const [selectedTransactions, setSelectedTransactions] = useState(() => new Set());
   const [bulkAccount, setBulkAccount] = useState('');
   const [newAccountName, setNewAccountName] = useState('');
   const [newAccountParent, setNewAccountParent] = useState('Sundry Creditors');
   const [newAccountStatus, setNewAccountStatus] = useState('idle');
   const [newAccountError, setNewAccountError] = useState('');
+  const [accountTotalsQuery, setAccountTotalsQuery] = useState({
+    accountName: '',
+    fromDate: statementPeriodDates.fromDate,
+    toDate: statementPeriodDates.toDate,
+    skipVoucherTypes: [],
+  });
+  const [accountTotalsStatus, setAccountTotalsStatus] = useState('idle');
+  const [accountTotalsMessage, setAccountTotalsMessage] = useState('');
+  const [accountTotals, setAccountTotals] = useState([]);
   const accountsSectionRef = useRef(null);
   const missingAccounts = missingBankAccountSelections(statement);
   const selectedVoucherDetails = transactions
@@ -1086,6 +1191,38 @@ function BankStatementVouchers({
       ),
     }));
   };
+
+  const setAccountTotalsQueryField = (key, value) => {
+    setAccountTotalsQuery((currentQuery) => ({
+      ...currentQuery,
+      [key]: value,
+    }));
+  };
+
+  const toggleSkippedVoucherType = (voucherType) => {
+    setAccountTotalsQuery((currentQuery) => {
+      const skippedTypes = new Set(currentQuery.skipVoucherTypes || []);
+      if (skippedTypes.has(voucherType)) {
+        skippedTypes.delete(voucherType);
+      } else {
+        skippedTypes.add(voucherType);
+      }
+
+      return {
+        ...currentQuery,
+        skipVoucherTypes: Array.from(skippedTypes),
+      };
+    });
+  };
+
+  useEffect(() => {
+    const nextDates = statementPeriodDateInputs(statement.statement_period);
+    setAccountTotalsQuery((currentQuery) => ({
+      ...currentQuery,
+      fromDate: currentQuery.fromDate || nextDates.fromDate,
+      toDate: currentQuery.toDate || nextDates.toDate,
+    }));
+  }, [statement.statement_period]);
 
   const toggleTransactionSelection = (transactionIndex) => {
     setSelectedTransactions((currentSelection) => {
@@ -1175,6 +1312,34 @@ function BankStatementVouchers({
     }
   };
 
+  const handleFetchAccountTotals = async () => {
+    setAccountTotalsStatus('loading');
+    setAccountTotalsMessage('');
+    setAccountTotals([]);
+
+    try {
+      if (!accountTotalsQuery.accountName) {
+        throw new Error('Select an account before fetching period totals.');
+      }
+      if (!accountTotalsQuery.fromDate || !accountTotalsQuery.toDate) {
+        throw new Error('Select both from and to dates before fetching period totals.');
+      }
+
+      const accountsForPeriod = await onFetchAccountTotals(accountTotalsQuery);
+      setAccountTotals(accountsForPeriod);
+      setAccountTotalsStatus('complete');
+      setAccountTotalsMessage(
+        accountsForPeriod.length
+          ? 'Account totals loaded from Tally.'
+          : 'No totals were returned for this account and period.',
+      );
+    } catch (error) {
+      setAccountTotals([]);
+      setAccountTotalsStatus('error');
+      setAccountTotalsMessage(error.message || 'Could not fetch account totals.');
+    }
+  };
+
   return (
     <div className="bank-voucher-editor">
       <VoucherSection title="Statement">
@@ -1220,12 +1385,176 @@ function BankStatementVouchers({
             <RefreshCw aria-hidden="true" size={16} />
             <span>{bankAccountsStatus === 'loading' ? 'Fetching...' : 'Fetch Bank Accounts'}</span>
           </button>
+          <button
+            type="button"
+            className="secondary-action-button fetch-bank-account-button"
+            disabled={accountsStatus === 'loading'}
+            onClick={onFetchAccounts}
+          >
+            <RefreshCw aria-hidden="true" size={16} />
+            <span>{accountsStatus === 'loading' ? 'Fetching...' : 'Fetch Ledger Accounts'}</span>
+          </button>
         </div>
         {(bankAccountsMessage || missingStatementBankAccount(statement)) && (
           <p className={`account-status ${missingStatementBankAccount(statement) ? 'error' : ''}`}>
             {bankAccountsMessage || 'Select the Tally bank account for this statement.'}
           </p>
         )}
+        <div className="account-period-panel">
+          <div className="account-period-controls">
+            <label className="voucher-field">
+              <span>Account Details</span>
+              <select
+                value={accountTotalsQuery.accountName}
+                disabled={accountsStatus === 'loading'}
+                onChange={(event) => setAccountTotalsQueryField('accountName', event.target.value)}
+              >
+                <option value="">
+                  {accountsStatus === 'loading' ? 'Loading accounts...' : 'Select account'}
+                </option>
+                {accounts.map((account) => (
+                  <option value={account.name} key={account.name}>
+                    {accountDisplayName(account)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="voucher-field">
+              <span>From Date</span>
+              <input
+                type="date"
+                value={accountTotalsQuery.fromDate}
+                onChange={(event) => setAccountTotalsQueryField('fromDate', event.target.value)}
+              />
+            </label>
+            <label className="voucher-field">
+              <span>To Date</span>
+              <input
+                type="date"
+                value={accountTotalsQuery.toDate}
+                onChange={(event) => setAccountTotalsQueryField('toDate', event.target.value)}
+              />
+            </label>
+            <fieldset className="skip-voucher-types">
+              <legend>Skip Types</legend>
+              <div>
+                {accountVoucherTypes.map((voucherType) => (
+                  <label key={voucherType}>
+                    <input
+                      type="checkbox"
+                      checked={(accountTotalsQuery.skipVoucherTypes || []).includes(voucherType)}
+                      onChange={() => toggleSkippedVoucherType(voucherType)}
+                    />
+                    <span>{voucherType}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <button
+              type="button"
+              className="secondary-action-button"
+              disabled={accountTotalsStatus === 'loading'}
+              onClick={handleFetchAccountTotals}
+            >
+              <RefreshCw aria-hidden="true" size={16} />
+              <span>{accountTotalsStatus === 'loading' ? 'Fetching...' : 'Fetch Details'}</span>
+            </button>
+          </div>
+          {accountTotalsMessage && (
+            <p className={`account-status ${accountTotalsStatus === 'error' ? 'error' : ''}`}>
+              {accountTotalsMessage}
+            </p>
+          )}
+          {accountTotals.map((account) => (
+            <React.Fragment key={account.name}>
+              <div className="account-total-grid">
+                <div>
+                  <span>Account</span>
+                  <strong>{account.name}</strong>
+                </div>
+                <div>
+                  <span>Applied Period</span>
+                  <strong>{[account.period_from, account.period_to].filter(Boolean).join(' to ') || '-'}</strong>
+                </div>
+                <div>
+                  <span>Group</span>
+                  <strong>{account.parent || '-'}</strong>
+                </div>
+                <div>
+                  <span>Opening</span>
+                  <strong>Rs. {formatMoney(account.opening_balance)}</strong>
+                </div>
+                <div>
+                  <span>Debit Total</span>
+                  <strong>Rs. {formatMoney(account.debit_total)}</strong>
+                </div>
+                <div>
+                  <span>Credit Total</span>
+                  <strong>Rs. {formatMoney(account.credit_total)}</strong>
+                </div>
+                <div>
+                  <span>Net Movement</span>
+                  <strong>Rs. {formatMoney(account.net_movement)}</strong>
+                </div>
+                <div>
+                  <span>Closing</span>
+                  <strong>Rs. {formatMoney(account.closing_balance)}</strong>
+                </div>
+                <div>
+                  <span>Vouchers</span>
+                  <strong>{account.voucher_count || 0}</strong>
+                </div>
+                <div>
+                  <span>Skipped Dates</span>
+                  <strong>{account.skipped_out_of_period || 0}</strong>
+                </div>
+                <div>
+                  <span>Skipped Types</span>
+                  <strong>{account.skipped_by_type || 0}</strong>
+                </div>
+              </div>
+              {(account.vouchers || []).length > 0 && (
+                <div className="account-voucher-details">
+                  <div className="account-voucher-header">
+                    <strong>Voucher Details</strong>
+                    <span>{account.vouchers.length} rows</span>
+                  </div>
+                  <div className="account-voucher-table-wrap">
+                    <table className="account-voucher-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Type</th>
+                          <th>No / Ref</th>
+                          <th>Debit</th>
+                          <th>Credit</th>
+                          <th>Opposite Ledger</th>
+                          <th>Narration</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {account.vouchers.map((voucher, voucherIndex) => (
+                          <tr key={`${voucher.voucher_key || voucher.master_id || voucher.voucher_number || 'voucher'}-${voucherIndex}`}>
+                            <td>{voucher.date || '-'}</td>
+                            <td>{voucher.voucher_type || '-'}</td>
+                            <td>
+                              <strong>{voucher.voucher_number || '-'}</strong>
+                              {voucher.reference && <small>{voucher.reference}</small>}
+                            </td>
+                            <td>Rs. {formatMoney(voucher.debit_amount)}</td>
+                            <td>Rs. {formatMoney(voucher.credit_amount)}</td>
+                            <td>{voucherOppositeLedgerText(voucher) || voucher.party_ledger || '-'}</td>
+                            <td>{voucher.narration || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
       </VoucherSection>
 
       <div className="bank-summary-grid">
@@ -1904,6 +2233,30 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
     }
   };
 
+  const fetchAccountTotals = async ({ accountName, fromDate, toDate, skipVoucherTypes = [] }) => {
+    if (!selectedClient) {
+      throw new Error('Select a client before fetching account totals.');
+    }
+
+    const params = new URLSearchParams({
+      company_name: selectedClient,
+      account_name: accountName,
+      from_date: fromDate,
+      to_date: toDate,
+    });
+    if (skipVoucherTypes.length > 0) {
+      params.set('skip_voucher_types', skipVoucherTypes.join(','));
+    }
+    const response = await fetch(`${API_BASE_URL}/tally/account-totals?${params.toString()}`);
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(payload.detail || 'Could not fetch account totals.');
+    }
+
+    return payload.accounts || [];
+  };
+
   const handleAddTallyAccount = async ({ name, parent }) => {
     if (!selectedClient) {
       throw new Error('Select a client before adding an account.');
@@ -2207,6 +2560,7 @@ function FilePreviewPage({ selectedFile, selectedClient, onBack }) {
                   onFetchAccounts={loadTallyAccounts}
                   onFetchBankAccounts={loadTallyBankAccounts}
                   onAddAccount={handleAddTallyAccount}
+                  onFetchAccountTotals={fetchAccountTotals}
                 />
               ) : (
                 <EditableVoucher voucher={voucherData} onVoucherChange={setVoucherData} />
